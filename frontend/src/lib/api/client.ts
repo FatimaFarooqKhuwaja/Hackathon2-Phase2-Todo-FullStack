@@ -1,5 +1,9 @@
-//lib/api/client.ts
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+// lib/api/client.ts
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+// Normalize base URL (remove trailing slash if any)
+const normalizedBase = API_BASE_URL.replace(/\/$/, '');
 
 interface RequestOptions extends RequestInit {}
 
@@ -16,7 +20,7 @@ export async function apiRequest<T>(
   const config: RequestInit = {
     method,
     headers,
-    credentials: 'include', // ✅ important for cookie-based auth
+    credentials: 'include',
     ...options,
   };
 
@@ -24,43 +28,33 @@ export async function apiRequest<T>(
     config.body = JSON.stringify(data);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, config);
+  // Normalize path: always start with /
+  const fullPath = path.startsWith('/') ? path : '/' + path;
 
-  // -----------------------
-  // ✅ Handle Unauthorized
-  // -----------------------
+  // Debug log – ye console mein dikhega
+  console.log('API Request:', {
+    url: `${normalizedBase}${fullPath}`,
+    method,
+    body: data ? JSON.stringify(data) : null
+  });
+
+  const response = await fetch(`${normalizedBase}${fullPath}`, config);
+
   if (response.status === 401) {
-    // Only redirect if not already on login page
     if (window.location.pathname !== '/login') {
       window.location.href = '/login';
     }
     throw new Error('Unauthorized - please login again');
   }
 
-  // -----------------------
-  // Handle other errors
-  // -----------------------
   if (!response.ok) {
     let errorMessage = 'Something went wrong';
 
     try {
       const errorData = await response.json();
-
-      if (typeof errorData === 'string') {
-        errorMessage = errorData;
-      } else if (errorData?.detail) {
-        errorMessage = errorData.detail;
-      } else if (errorData?.message) {
-        errorMessage = errorData.message;
-      } else {
-        errorMessage = JSON.stringify(errorData);
-      }
+      errorMessage = errorData.detail || errorData.message || JSON.stringify(errorData);
     } catch {
-      try {
-        errorMessage = await response.text();
-      } catch {
-        errorMessage = `Server error: ${response.status}`;
-      }
+      errorMessage = await response.text() || `Server error: ${response.status}`;
     }
 
     throw new ApiError(errorMessage, response);
@@ -85,9 +79,7 @@ export class ApiError extends Error {
   }
 }
 
-// -----------------------
 // API helpers
-// -----------------------
 export const api = {
   get: <T>(path: string, options?: RequestOptions) =>
     apiRequest<T>('GET', path, undefined, options),
@@ -101,3 +93,10 @@ export const api = {
   delete: <T>(path: string, options?: RequestOptions) =>
     apiRequest<T>('DELETE', path, undefined, options),
 };
+
+
+
+
+
+
+

@@ -1,7 +1,7 @@
-"use client"
+ "use client"
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { AuthEndpoints } from '../lib/api/endpoints';
 import { User, LoginCredentials, RegisterCredentials } from '../types/auth';
 import { ApiError } from '../lib/api/client';
@@ -27,9 +27,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  const searchParams = useSearchParams();  // For redirect param
 
   const fetchUser = useCallback(async () => {
-    // If no token, skip fetching user
     const token = getAuthToken();
     if (!token) {
       setUser(null);
@@ -41,7 +41,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userData = await AuthEndpoints.me();
       setUser(userData);
     } catch (err: any) {
-      // Treat unauthorized or not found as "not logged in"
       if (err instanceof ApiError && (err.status === 401 || err.status === 404)) {
         setUser(null);
         removeAuthToken();
@@ -52,34 +51,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setIsLoading(false);
     }
-  }, []); // Remove router from dependency - not needed
+  }, []);
 
-  // -------------------- Fetch User on Mount --------------------
   useEffect(() => {
     fetchUser();
   }, [fetchUser]);
 
   // -------------------- Login --------------------
-  const login = async (credentials: LoginCredentials) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-   // Line 67-72 ko isse replace karo:
-const resp = await AuthEndpoints.login(credentials);
-// Store token if present
-const token = (resp as any)?.access_token || (resp as any)?.token || (resp as any)?.access;
-if (token) {
-  setAuthToken(token);
-}
-      await fetchUser(); // Fetch user data after login
-      router.push('/dashboard');
-    } catch (err: any) {
-      setError(err?.message || 'Login failed');
-      throw err;
-    } finally {
-      setIsLoading(false);
+
+
+const login = async (credentials: LoginCredentials) => {
+  setIsLoading(true);
+  setError(null);
+  try {
+    const resp = await AuthEndpoints.login(credentials);
+
+    const tokenFromBody = (resp as any)?.access_token || (resp as any)?.token || (resp as any)?.access;
+    if (tokenFromBody) {
+      setAuthToken(tokenFromBody);
     }
-  };
+
+    // Longer delay for cookie to propagate in production (network latency)
+    await new Promise(resolve => setTimeout(resolve, 1000));  // 1 second (was 500ms)
+
+    await fetchUser();  // Refresh user state
+
+    // Get redirect path from query param or default
+    const redirectPath = searchParams.get('redirect') || '/dashboard';
+
+    // Push to new route
+    router.push(redirectPath);
+
+    // Force refresh to sync middleware/auth state
+    router.refresh();
+  } catch (err: any) {
+    setError(err?.message || 'Login failed');
+    console.error('Login error:', err);
+    throw err;
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   // -------------------- Register --------------------
   const register = async (credentials: RegisterCredentials) => {
@@ -103,7 +115,6 @@ if (token) {
     try {
       await AuthEndpoints.logout();
     } catch (err: any) {
-      // Ignore server errors for logout, still clear client state
       console.warn('Logout request failed:', err);
     } finally {
       removeAuthToken();
@@ -113,7 +124,6 @@ if (token) {
     }
   };
 
-  // -------------------- Derived --------------------
   const isLoggedIn = !!user;
 
   return (
